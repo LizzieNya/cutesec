@@ -26,13 +26,13 @@ const ACCENTS = [
 
 function Toggle({ id, checked, onChange, label }) { // NOSONAR
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+    <label htmlFor={id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, cursor: 'pointer' }}>
       <span style={{ fontSize: '0.9em', color: '#666' }}>{label}</span>
       <span className="toggle-switch" aria-hidden="true">
         <input type="checkbox" id={id} checked={checked} onChange={e => onChange(e.target.checked)} aria-label={label} />
         <span className="toggle-slider" />
       </span>
-    </div>
+    </label>
   )
 }
 
@@ -256,14 +256,18 @@ export default function SettingsTab({ isDesktop = false, showInstallFromSettings
           </a>
           {!isDesktop && (
             <button
-              id="installFromSettingsBtn"
               type="button"
               className="download-card download-card-info-only"
-              style={{ display: showInstallFromSettings ? 'flex' : 'none' }}
-              onClick={onInstallFromSettings}
+              onClick={() => {
+                if (showInstallFromSettings) {
+                  onInstallFromSettings()
+                } else {
+                  showMessage('To install on iOS: Tap Share ⬆️ then "Add to Home Screen". On Android: Tap menu ⋮ then "Install App" or "Add to Home Screen".', 'info', 10000)
+                }
+              }}
             >
               <div className="download-card-icon">🌐</div>
-              <div className="download-card-info"><strong>Web App (PWA)</strong><span>Install from your browser for app-like experience</span></div>
+              <div className="download-card-info"><strong>Web App (PWA)</strong><span>Install for iOS / Android without App Store</span></div>
               <div className="download-card-action">Install</div>
             </button>
           )}

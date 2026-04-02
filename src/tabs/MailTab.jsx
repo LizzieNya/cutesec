@@ -6,7 +6,7 @@ function getPeerIdFromPublicKey(pubKeyPem) {
   if (!pubKeyPem) return ''
   const forge = globalThis.forge || forgeLib
   const md = forge.md.sha256.create()
-  md.update(pubKeyPem)
+  md.update(pubKeyPem.replace(/\s+/g, ''))
   return 'cutesec_' + md.digest().toHex().slice(0, 24)
 }
 

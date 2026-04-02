@@ -676,7 +676,8 @@ textarea:focus {
 
 .message {
   position: fixed;
-  top: 12px;
+  top: env(safe-area-inset-top, 12px);
+  margin-top: 12px;
   left: 50%;
   transform: translateX(-50%);
   width: min(92vw, 680px);
@@ -685,7 +686,6 @@ textarea:focus {
   user-select: text; /* Allow copying error texts */
   padding: 12px;
   border-radius: 12px;
-  margin-top: 0;
   text-align: center;
   font-weight: 600;
   display: none;
@@ -733,6 +733,12 @@ textarea:focus {
   background: #ffb8b8;
   border: 2px solid #e46a6a;
   color: #5f0000;
+}
+
+.message.info, .message.warning {
+  background: #ffecb3;
+  border: 2px solid #fbc02d;
+  color: #7a5a04;
 }
 
 .contacts-list h3 {
@@ -1868,6 +1874,9 @@ body.font-small textarea,
 body.font-small input {
   font-size: 12px;
 }
+body.font-small .chat-bubble {
+  font-size: 0.8em;
+}
 
 body.font-medium {
   font-size: 16px;
@@ -1876,6 +1885,9 @@ body.font-medium textarea,
 body.font-medium input {
   font-size: 14px;
 }
+body.font-medium .chat-bubble {
+  font-size: 0.88em;
+}
 
 body.font-large {
   font-size: 18px;
@@ -1883,6 +1895,9 @@ body.font-large {
 body.font-large textarea,
 body.font-large input {
   font-size: 16px;
+}
+body.font-large .chat-bubble {
+  font-size: 1.05em;
 }
 
 
@@ -2100,6 +2115,13 @@ body.layout-compact .stego-drop-zone {
 body.layout-compact .setting-item {
   padding: 10px;
   margin-bottom: 8px;
+}
+body.layout-compact .chat-bubble {
+  padding: 6px 10px;
+  border-radius: 12px;
+}
+body.layout-compact .chat-bubble-row {
+  margin-bottom: 2px;
 }
 
 /* Professional Mode (Cleaner look) */
@@ -3089,6 +3111,9 @@ body.is-desktop #createIdentityBtn:hover {
   align-items: center;
   justify-content: center;
   padding: 0 5px;
+  margin-left: 8px;
+  align-self: center;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
 }
 
 .chat-no-contacts {

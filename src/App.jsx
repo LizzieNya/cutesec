@@ -129,9 +129,6 @@ function executeVerifyLinkOtp({
   sendTo,
   otpInput,
   scannedPayload,
-  forge,
-  saveIdentity,
-  saveContacts,
   closeLinkModal,
   showMessage,
 }) {
@@ -140,41 +137,26 @@ function executeVerifyLinkOtp({
     showMessage('Enter a 6-digit OTP 🔢', 'error')
     return
   }
-  if (!scannedPayload) {
-    showMessage('Missing QR payload. Scan again.', 'error')
+  if (!scannedPayload?.h || !scannedPayload?.r) {
+    showMessage('Missing or invalid QR payload. Scan again.', 'error')
     return
   }
   try {
-    const salt = forge.util.decode64(scannedPayload.s)
-    const iv = forge.util.decode64(scannedPayload.iv)
-    const encrypted = forge.util.decode64(scannedPayload.d)
-    const key = forge.pkcs5.pbkdf2(otp, salt, 10000, 32, forge.md.sha256.create())
-    const decipher = forge.cipher.createDecipher('AES-CBC', key)
-    decipher.start({ iv })
-    decipher.update(forge.util.createBuffer(encrypted))
-    if (!decipher.finish()) throw new Error('Decryption failed')
-    const imported = JSON.parse(decipher.output.toString())
-    if (!imported?.privateKey || !imported?.publicKey) throw new Error('Invalid linked payload')
-    saveIdentity({ privateKey: imported.privateKey, publicKey: imported.publicKey })
-    if (Array.isArray(imported.contacts)) saveContacts(imported.contacts)
+    globalThis.cuteGuestLinkOtp = otp;
+    sendTo(scannedPayload.h, { 
+      type: 'LINK_IDENTITY_REQ',
+      r: scannedPayload.r
+    })
+    showMessage('Requesting Identity via P2P...', 'info')
     closeLinkModal()
-    showMessage('Device linked successfully! 🎉', 'success')
-    if (imported.h && sendTo) {
-      setTimeout(() => {
-        sendTo(imported.h, { type: 'SYNC_CONTACTS_REQ' })
-        showMessage('Requesting contacts safely...', 'info')
-      }, 500)
-    }
   } catch (e) {
-    showMessage('Invalid OTP or QR payload: ' + e.message, 'error')
+    showMessage('Request failed: ' + e.message, 'error')
   }
 }
 
 async function executeGenerateHostLink({
   identity,
   myPeerId,
-  contacts,
-  forge,
   setHostOtp,
   setHostQrDataUrl,
   setShowHostModal,
@@ -186,26 +168,12 @@ async function executeGenerateHostLink({
   }
   try {
     const otp = Math.floor(100000 + Math.random() * 900000).toString()
-    const salt = forge.random.getBytesSync(16)
-    const iv = forge.random.getBytesSync(16)
-    const key = forge.pkcs5.pbkdf2(otp, salt, 10000, 32, forge.md.sha256.create())
-    const payload = JSON.stringify({
-      privateKey: identity.privateKey,
-      publicKey: identity.publicKey,
-      h: myPeerId,
-    })
-    const cipher = forge.cipher.createCipher('AES-CBC', key)
-    cipher.start({ iv })
-    cipher.update(forge.util.createBuffer(payload, 'utf8'))
-    const passed = cipher.finish()
-    if (!passed) throw new Error('Could not encrypt payload')
-    const transferData = JSON.stringify({
-      v: '1',
-      s: forge.util.encode64(salt),
-      iv: forge.util.encode64(iv),
-      d: forge.util.encode64(cipher.output.getBytes()),
-    })
-    const qrDataUrl = await QRCode.toDataURL(transferData, { width: 256, margin: 1 })
+    const reqHash = Math.random().toString(36).substring(2, 10)
+    globalThis.cuteHostLinkHash = reqHash;
+    globalThis.cuteHostLinkOtp = otp;
+    globalThis.cuteHostIdentity = identity;
+    const transferData = JSON.stringify({ h: myPeerId, r: reqHash })
+    const qrDataUrl = await QRCode.toDataURL(transferData, { width: 256, margin: 1, errorCorrectionLevel: 'L' })
     setHostOtp(otp)
     setHostQrDataUrl(qrDataUrl)
     setShowHostModal(true)
@@ -243,6 +211,7 @@ export default function App() { // NOSONAR
     webOnline, mailUnreadCount,
     activeChatContact, setActiveChatContact,
     message, showMessage,
+    chatUnreadCounts, clearChatUnread,
     autoRead, setPgpModeEnabled,
     pgpModeEnabled,
   } = useApp()
@@ -260,6 +229,67 @@ export default function App() { // NOSONAR
           sendTo(remotePeerId, { type: 'SYNC_CONTACTS_RES', contacts })
         }
       }
+      if (data?.type === 'LINK_IDENTITY_REQ') {
+        if (data.r && data.r === globalThis.cuteHostLinkHash && globalThis.cuteHostIdentity) {
+          try {
+            const forge = globalThis.forge || forgeLib
+            const salt = forge.random.getBytesSync(16)
+            const iv = forge.random.getBytesSync(16)
+            const key = forge.pkcs5.pbkdf2(globalThis.cuteHostLinkOtp, salt, 10000, 32, forge.md.sha256.create())
+            const payload = JSON.stringify({
+              privateKey: globalThis.cuteHostIdentity.privateKey,
+              publicKey: globalThis.cuteHostIdentity.publicKey
+            })
+            const cipher = forge.cipher.createCipher('AES-CBC', key)
+            cipher.start({ iv })
+            cipher.update(forge.util.createBuffer(payload, 'utf8'))
+            if (!cipher.finish()) throw new Error('Encrypt failed')
+            
+            sendTo(remotePeerId, {
+              type: 'LINK_IDENTITY_RES',
+              s: forge.util.encode64(salt),
+              iv: forge.util.encode64(iv),
+              d: forge.util.encode64(cipher.output.getBytes())
+            })
+            showMessage('Identity sent safely! ✅', 'success')
+          } catch(err) {
+            console.error(err)
+            showMessage('Host link generic failure! ' + err.message, 'error')
+          }
+        } else {
+          showMessage('Invalid link code or hash! Make sure the host window is waiting linking.', 'error')
+        }
+      }
+      if (data?.type === 'LINK_IDENTITY_RES') {
+        if (!globalThis.cuteGuestLinkOtp) return
+        try {
+          const forge = globalThis.forge || forgeLib
+          const otp = globalThis.cuteGuestLinkOtp
+          const salt = forge.util.decode64(data.s)
+          const iv = forge.util.decode64(data.iv)
+          const encrypted = forge.util.decode64(data.d)
+          
+          const key = forge.pkcs5.pbkdf2(otp, salt, 10000, 32, forge.md.sha256.create())
+          const decipher = forge.cipher.createDecipher('AES-CBC', key)
+          decipher.start({ iv })
+          decipher.update(forge.util.createBuffer(encrypted))
+          if (!decipher.finish()) throw new Error('Decryption failed, wrong OTP')
+          
+          const imported = JSON.parse(decipher.output.toString())
+          if (!imported?.privateKey || !imported?.publicKey) throw new Error('Invalid payload')
+          
+          saveIdentity({ privateKey: imported.privateKey, publicKey: imported.publicKey })
+          showMessage('Device linked successfully! 🎉', 'success')
+          
+          setTimeout(() => {
+            sendTo(remotePeerId, { type: 'SYNC_CONTACTS_REQ' })
+          }, 500)
+          
+          delete globalThis.cuteGuestLinkOtp
+        } catch(err) {
+          showMessage('Linking failed: ' + err.message, 'error')
+        }
+      }
       if (data?.type === 'SYNC_CONTACTS_RES') {
         if (Array.isArray(data.contacts)) {
           saveContacts(data.contacts)
@@ -269,7 +299,7 @@ export default function App() { // NOSONAR
     }
     globalThis.addEventListener('cute-peer-data', p2pSyncHandler)
     return () => globalThis.removeEventListener('cute-peer-data', p2pSyncHandler)
-  }, [contacts, sendTo, saveContacts, showMessage])
+  }, [contacts, sendTo, saveContacts, saveIdentity, showMessage])
 
   const forge = globalThis.forge || forgeLib
   const isDesktop = detectDesktop()
@@ -384,7 +414,7 @@ export default function App() { // NOSONAR
       if (code?.data) {
         try {
           const parsed = JSON.parse(code.data)
-          if (parsed.v && parsed.s && parsed.iv && parsed.d) {
+          if (parsed.h && parsed.r) {
             setScannedPayload(parsed)
             setLinkStep('otp')
             stopVideoOnly()
@@ -547,7 +577,19 @@ export default function App() { // NOSONAR
         )}
 
         {/* --- Drawer Menu --- */}
-        <div className={`drawer-overlay ${isDrawerOpen ? 'open' : ''}`} onClick={() => setIsDrawerOpen(false)} />
+        <div 
+          className={`drawer-overlay ${isDrawerOpen ? 'open' : ''}`} 
+          onClick={() => setIsDrawerOpen(false)}
+          role="button"
+          tabIndex={isDrawerOpen ? 0 : -1}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              setIsDrawerOpen(false)
+            }
+          }}
+          aria-label="Close menu"
+        />
         <div className={`drawer-menu ${isDrawerOpen ? 'open' : ''}`}>
           <div className="drawer-header">
             <h3>Menu</h3>
@@ -563,8 +605,15 @@ export default function App() { // NOSONAR
                   setIsDrawerOpen(false);
                 }}
               >
-                <span className="drawer-item-icon">{icon}</span>
-                <span className="drawer-item-label">{label}</span>
+                <div style={{ display: 'flex', alignItems: 'center' }}>
+                  <span className="drawer-item-icon">{icon}</span>
+                  <span className="drawer-item-label">{label}</span>
+                </div>
+                {t === 'mail' && mailUnreadCount > 0 && (
+                  <span className="chat-unread-badge" style={{ position: 'relative', transform: 'none', marginLeft: 'auto' }}>
+                    {mailUnreadCount}
+                  </span>
+                )}
               </button>
             ))}
             {pgpModeEnabled && (
@@ -589,8 +638,26 @@ export default function App() { // NOSONAR
               >
                 ☰
               </button>
-              <div className="nav-profile-avatar" onClick={() => setIsDrawerOpen(true)} style={{ cursor: 'pointer' }}>🧸</div>
-              <div className="nav-profile-info" onClick={() => setIsDrawerOpen(true)} style={{ cursor: 'pointer', flex: 1 }}>
+              <div 
+                className="nav-profile-avatar" 
+                onClick={() => setIsDrawerOpen(true)} 
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsDrawerOpen(true) }}
+                style={{ cursor: 'pointer' }}
+                aria-label="Open menu from avatar"
+              >
+                🧸
+              </div>
+              <div 
+                className="nav-profile-info" 
+                onClick={() => setIsDrawerOpen(true)} 
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsDrawerOpen(true) }}
+                style={{ cursor: 'pointer', flex: 1 }}
+                aria-label="Open menu from status"
+              >
                 <span style={{ color: hasIdentity ? '#2ecc71' : '#e74c3c' }}>
                   {hasIdentity ? '● Secure' : '● No Identity'}
                 </span>
@@ -599,7 +666,14 @@ export default function App() { // NOSONAR
             </div>
 
             {!hasIdentity && (
-              <div style={{ padding:'12px', background:'rgba(255,105,180,0.08)', borderBottom:'1px solid var(--border-soft)', cursor:'pointer' }} onClick={() => setActiveTab('settings')}>
+              <div 
+                style={{ padding:'12px', background:'rgba(255,105,180,0.08)', borderBottom:'1px solid var(--border-soft)', cursor:'pointer' }} 
+                onClick={() => setActiveTab('settings')}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setActiveTab('settings') }}
+                aria-label="Go to settings to set up identity"
+              >
                 <p style={{ fontSize:'0.8em', color:'#9a89b3', marginBottom:0 }}>🔐 Set up your identity in Settings</p>
               </div>
             )}
@@ -621,8 +695,12 @@ export default function App() { // NOSONAR
                   <button
                     key={c.name}
                     type="button"
-                    className={`chat-contact-item${activeChatContact === c.name ? ' active' : ''}`}
-                    onClick={() => { setActiveChatContact(c.name); setActiveTab('chat') }}
+                    className={`chat-contact-item${activeChatContact === c.name ? ' active' : ''}${chatUnreadCounts[c.name] ? ' has-unread' : ''}`}
+                    onClick={() => { 
+                      setActiveChatContact(c.name); 
+                      setActiveTab('chat');
+                      clearChatUnread(c.name);
+                    }}
                     style={{ width: '100%', textAlign: 'left', border: 0, background: 'transparent' }}
                   >
                     <div className="chat-contact-avatar">{c.name[0].toUpperCase()}</div>
@@ -630,6 +708,9 @@ export default function App() { // NOSONAR
                       <div className="chat-contact-name">{c.name}</div>
                       <div className="chat-contact-preview">🔒 End-to-End Encrypted</div>
                     </div>
+                    {chatUnreadCounts[c.name] > 0 && (
+                      <div className="chat-unread-badge">{chatUnreadCounts[c.name]}</div>
+                    )}
                   </button>
                 ))
               )}

@@ -48,6 +48,33 @@ export function AppProvider({ children }) { // NOSONAR
 
   const [message, setMessage] = useState(null)
   const [activeChatContact, setActiveChatContact] = useState(null)
+  
+  const [chatUnreadCounts, setChatUnreadCounts] = useState(() => {
+    try {
+      const stored = localStorage.getItem('cute_chat_unreads')
+      return stored ? JSON.parse(stored) : {}
+    } catch {
+      return {}
+    }
+  })
+
+  const incrementChatUnread = useCallback((contactName) => {
+    setChatUnreadCounts(prev => {
+      const next = { ...prev, [contactName]: (prev[contactName] || 0) + 1 }
+      localStorage.setItem('cute_chat_unreads', JSON.stringify(next))
+      return next
+    })
+  }, [])
+
+  const clearChatUnread = useCallback((contactName) => {
+    setChatUnreadCounts(prev => {
+      if (!prev[contactName]) return prev
+      const next = { ...prev }
+      delete next[contactName]
+      localStorage.setItem('cute_chat_unreads', JSON.stringify(next))
+      return next
+    })
+  }, [])
 
   useEffect(() => {
     const syncWebOnline = () => setWebOnline(globalThis.navigator?.onLine ?? true)
@@ -214,7 +241,7 @@ export function AppProvider({ children }) { // NOSONAR
   useEffect(() => { DB.set('cute-pgp-mode', pgpModeEnabled) }, [pgpModeEnabled])
 
   // ── Show toast message ──
-  const showMessage = useCallback((text, type = 'info', duration = 8000) => {
+  const showMessage = useCallback((text, type = 'info', duration = 5000) => {
     setMessage({ text, type })
     setTimeout(() => setMessage(null), duration)
   }, [])
@@ -277,6 +304,7 @@ export function AppProvider({ children }) { // NOSONAR
     playSound,
     // UI
     message, showMessage,
+    chatUnreadCounts, incrementChatUnread, clearChatUnread,
     activeChatContact, setActiveChatContact,
   }), [
     identity, saveIdentity, clearIdentity,
@@ -301,6 +329,7 @@ export function AppProvider({ children }) { // NOSONAR
     refreshOperationalIndicators,
     playSound,
     message, showMessage,
+    chatUnreadCounts, incrementChatUnread, clearChatUnread,
     activeChatContact, setActiveChatContact,
   ])
 

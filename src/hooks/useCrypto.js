@@ -95,7 +95,8 @@ export function useCrypto() {
     if (!identity?.publicKey) return ''
     const forge = getForge()
     const md = forge.md.sha256.create()
-    md.update(identity.publicKey)
+    // Normalize to prevent \r\n vs \n hash mismatches
+    md.update(identity.publicKey.replace(/\s+/g, ''))
     return 'cutesec_' + md.digest().toHex().slice(0, 24)
   }, [identity])
 

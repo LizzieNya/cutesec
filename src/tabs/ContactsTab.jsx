@@ -90,7 +90,7 @@ export default function ContactsTab() {
         authTag: forge.util.encode64(cipher.mode.tag.getBytes()),
         data: forge.util.encode64(cipher.output.getBytes()),
       }
-      const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' })
+      const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/octet-stream' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url

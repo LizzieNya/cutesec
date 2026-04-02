@@ -7,7 +7,7 @@ function getPeerIdFromPublicKey(pubKeyPem) {
   if (!pubKeyPem) return ''
   const forge = globalThis.forge || forgeLib
   const md = forge.md.sha256.create()
-  md.update(pubKeyPem)
+  md.update(pubKeyPem.replace(/\s+/g, ''))
   return 'cutesec_' + md.digest().toHex().slice(0, 24)
 }
 
@@ -23,6 +23,8 @@ export default function ChatTab() {
     setActiveChatContact,
     chatOperationalNotice,
     playSound,
+    incrementChatUnread,
+    clearChatUnread
   } = useApp()
   const { encryptForRecipient, decryptMessage } = useCrypto()
   const [messages, setMessages] = useState([])
@@ -40,12 +42,36 @@ export default function ChatTab() {
     const saved = DB.get(historyKey) || []
     let cancelled = false
     Promise.resolve().then(() => {
-      if (!cancelled) setMessages(saved)
+      if (!cancelled) {
+        setMessages(saved)
+        clearChatUnread(activeChatContact)
+        
+        // If we have messages from them that we never read (we can infer this if needed, 
+        // but let's just send a bulk READ receipt for any non-read messages from them).
+        const contactName = activeChatContact
+        const contact = contacts.find(c => c.name === contactName)
+        if (contact && typeof globalThis.cuteSendToPeer === 'function') {
+          // Send bulk READ
+          const unreadIds = saved.filter(m => m.sender === 'them' && !m.readAckSent).map(m => m.id)
+          if (unreadIds.length > 0) {
+            const remotePeerId = getPeerIdFromPublicKey(contact.publicKey)
+            globalThis.cuteSendToPeer(remotePeerId, {
+              type: 'CHAT_MSG_READ_BULK',
+              msgIds: unreadIds,
+              senderKey: identity?.publicKey
+            })
+            // Mark them locally so we don't resend read receipts
+            const updated = saved.map(m => unreadIds.includes(m.id) ? { ...m, readAckSent: true } : m)
+            DB.set(historyKey, updated)
+            setMessages(updated)
+          }
+        }
+      }
     })
     return () => {
       cancelled = true
     }
-  }, [historyKey])
+  }, [historyKey, activeChatContact, contacts, identity, clearChatUnread])
 
   // Scroll to bottom on new messages
   useEffect(() => {
@@ -93,18 +119,19 @@ export default function ChatTab() {
     const contact = contacts.find((c) => c.name === contactName)
     if (!contact) return
     const remotePeerId = getPeerIdFromPublicKey(contact.publicKey)
-    const delivered = typeof globalThis.cuteSendToPeer === 'function'
+    const wasSent = typeof globalThis.cuteSendToPeer === 'function'
       ? globalThis.cuteSendToPeer(remotePeerId, {
           type: 'encrypted-message',
+          msgId,
           senderKey: identity?.publicKey,
           payload: msg.encrypted,
           timestamp: new Date().toISOString(),
         })
       : false
-    history[idx] = { ...msg, deliveryStatus: delivered ? 'delivered' : 'pending' }
+    history[idx] = { ...msg, deliveryStatus: wasSent ? 'sent' : 'pending' }
     DB.set(key, history)
     if (activeChatContact === contactName) setMessages(history)
-    showMessage(delivered ? 'Message re-sent via P2P ⚡' : 'Friend still offline, message remains pending', delivered ? 'success' : 'info')
+    showMessage(wasSent ? 'Message re-sent via P2P ⚡' : 'Friend still offline, message remains pending', wasSent ? 'success' : 'info')
   }
 
   const pasteFromClipboard = async () => {
@@ -215,7 +242,7 @@ export default function ChatTab() {
 
   const computeDeliveryStatus = ({ isNoteToSelf, sentViaP2P }) => {
     if (isNoteToSelf) return 'local'
-    return sentViaP2P ? 'delivered' : 'pending'
+    return sentViaP2P ? 'sent' : 'pending'
   }
 
   const showPostSendStatus = ({ isNoteToSelf, sentViaP2P }) => {
@@ -236,6 +263,7 @@ export default function ChatTab() {
     if (!contact && !isNoteToSelf) return showMessage('Contact not found 🚨', 'error')
 
     try {
+      const msgId = Date.now()
       const payload = getMessagePayload()
       const recipientPublicKey = isNoteToSelf ? identity?.publicKey : contact.publicKey
       const encrypted = encryptForRecipient(payload, recipientPublicKey)
@@ -243,6 +271,7 @@ export default function ChatTab() {
       const sentViaP2P = !isNoteToSelf && typeof globalThis.cuteSendToPeer === 'function'
         ? globalThis.cuteSendToPeer(remotePeerId, {
             type: 'encrypted-message',
+            msgId,
             senderKey: identity?.publicKey,
             payload: encrypted,
             timestamp: new Date().toISOString(),
@@ -250,7 +279,7 @@ export default function ChatTab() {
         : false
       const deliveryStatus = computeDeliveryStatus({ isNoteToSelf, sentViaP2P })
       const msg = {
-        id: Date.now(),
+        id: msgId,
         sender: 'me',
         content: inputText,
         img: attachImg,
@@ -278,9 +307,61 @@ export default function ChatTab() {
   useEffect(() => {
     const onPeerData = (event) => {
       const payload = event.detail?.data
+      const remotePeerId = event.detail?.remotePeerId
+
+      if (payload?.type === 'CHAT_MSG_ACK' || payload?.type === 'CHAT_MSG_READ' || payload?.type === 'CHAT_MSG_READ_BULK') {
+        const normalizeKey = (k) => (k || '').replace(/\s+/g, '')
+        const sender = contacts.find((c) => normalizeKey(c.publicKey) === normalizeKey(payload.senderKey))
+        if (!sender) return
+        
+        const key = `chat_history_${sender.name}`
+        const prev = DB.get(key) || []
+        
+        let changed = false
+        const next = prev.map(m => {
+          if (m.sender !== 'me') return m
+          
+          if (payload.type === 'CHAT_MSG_READ_BULK' && payload.msgIds?.includes(m.id)) {
+            if (m.deliveryStatus !== 'read') {
+              changed = true
+              return { ...m, deliveryStatus: 'read' }
+            }
+          } else if (m.id === payload.msgId) {
+            const newStatus = payload.type === 'CHAT_MSG_READ' ? 'read' : 'delivered'
+            if (m.deliveryStatus !== 'read' && m.deliveryStatus !== newStatus) {
+              changed = true
+              return { ...m, deliveryStatus: newStatus }
+            }
+          }
+          return m
+        })
+        
+        if (changed) {
+          DB.set(key, next)
+          if (activeChatContact === sender.name) setMessages(next)
+        }
+        return
+      }
+
       if (payload?.type !== 'encrypted-message') return
-      const sender = contacts.find((c) => (c.publicKey || '').trim() === (payload.senderKey || '').trim())
-      if (!sender) return
+      
+      const normalizeKey = (k) => (k || '').replace(/\s+/g, '')
+      const sender = contacts.find((c) => normalizeKey(c.publicKey) === normalizeKey(payload.senderKey))
+      
+      if (!sender) {
+        console.warn('Received P2P message but sender public key not found in contacts.', payload.senderKey)
+        return
+      }
+
+      // Send ACK back
+      if (payload.msgId && typeof globalThis.cuteSendToPeer === 'function' && remotePeerId) {
+        const ackType = activeChatContact === sender.name ? 'CHAT_MSG_READ' : 'CHAT_MSG_ACK'
+        globalThis.cuteSendToPeer(remotePeerId, {
+          type: ackType,
+          msgId: payload.msgId,
+          senderKey: identity?.publicKey
+        })
+      }
 
       try {
         const decrypted = decryptMessage(payload.payload)
@@ -298,17 +379,21 @@ export default function ChatTab() {
 
         const key = `chat_history_${sender.name}`
         const prev = DB.get(key) || []
+        const isCurrentlyOpen = activeChatContact === sender.name
         const next = [...prev, {
-          id: Date.now() + Math.floor(Math.random() * 1000),
+          id: payload.msgId || Date.now() + Math.floor(Math.random() * 1000), // ensure ID sync
           sender: 'them',
           content: text,
           img,
           encrypted: payload.payload,
           ts: Date.now(),
+          readAckSent: isCurrentlyOpen
         }]
         DB.set(key, next)
-        if (activeChatContact === sender.name) {
+        if (isCurrentlyOpen) {
           setMessages(next)
+        } else {
+          incrementChatUnread(sender.name)
         }
         showMessage(`New encrypted message from ${sender.name} 💌`, 'success')
         playSound('receive')
@@ -319,7 +404,7 @@ export default function ChatTab() {
 
     globalThis.addEventListener('cute-peer-data', onPeerData)
     return () => globalThis.removeEventListener('cute-peer-data', onPeerData)
-  }, [activeChatContact, contacts, decryptMessage, playSound, showMessage])
+  }, [activeChatContact, contacts, decryptMessage, playSound, showMessage, incrementChatUnread])
 
   useEffect(() => {
     const retryPendingChats = () => {
@@ -334,14 +419,15 @@ export default function ChatTab() {
         let changed = false
         const next = history.map((msg) => {
           if (msg.sender !== 'me' || msg.deliveryStatus !== 'pending' || !msg.encrypted) return msg
-          const delivered = globalThis.cuteSendToPeer(remotePeerId, {
+          const wasSent = globalThis.cuteSendToPeer(remotePeerId, {
             type: 'encrypted-message',
+            msgId: msg.id,
             senderKey: identity?.publicKey,
             payload: msg.encrypted,
             timestamp: new Date().toISOString(),
           })
-          if (delivered) changed = true
-          return { ...msg, deliveryStatus: delivered ? 'delivered' : 'pending' }
+          if (wasSent) changed = true
+          return { ...msg, deliveryStatus: wasSent ? 'sent' : 'pending' }
         })
         if (changed) {
           DB.set(key, next)
@@ -472,7 +558,12 @@ export default function ChatTab() {
                   🆔
                 </button>
                 <button className="btn-secondary btn-small"
-                  onClick={() => { saveMessages([]); showMessage('Chat cleared 🗑️', 'info') }}>
+                  onClick={() => { 
+                    if (globalThis.confirm('Are you sure you want to clear this entire chat history?')) {
+                      saveMessages([]); 
+                      showMessage('Chat cleared 🗑️', 'info');
+                    }
+                  }}>
                   🗑️
                 </button>
               </div>
@@ -488,7 +579,7 @@ export default function ChatTab() {
 
                 const msg = row.message
                 return (
-                  <div key={msg.id} className={`chat-message ${msg.sender === 'me' ? 'sent' : 'received'}`}>
+                  <div key={msg.id} className={`chat-bubble-row ${msg.sender === 'me' ? 'sent' : 'received'}`}>
                     <div className="chat-bubble">
                       {!msg.content && msg.sender === 'them' && msg.encrypted && (
                         <button
@@ -510,7 +601,16 @@ export default function ChatTab() {
                           🔁 Retry
                         </button>
                       )}
-                      <span className="chat-ts">{new Date(msg.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      <span className="chat-ts">
+                        {new Date(msg.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        {msg.sender === 'me' && activeChatContact !== 'Note to Self' && (
+                          <span className="chat-ticks" style={{ marginLeft: 6, fontSize: '1.2em', verticalAlign: 'middle', userSelect: 'none' }}>
+                            {msg.deliveryStatus === 'read' ? <span style={{ color: '#34B7F1' }}>✓✓</span> :
+                             msg.deliveryStatus === 'delivered' ? '✓✓' :
+                             msg.deliveryStatus === 'sent' ? '✓' : '⌚'}
+                          </span>
+                        )}
+                      </span>
                     </div>
                   </div>
                 )
