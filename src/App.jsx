@@ -13,11 +13,10 @@ import SettingsTab from './tabs/SettingsTab'
 import './styles.css'
 
 const StegoTab = lazy(() => import('./tabs/StegoTab'))
-const MailTab  = lazy(() => import('./tabs/MailTab'))
 const PgpTab   = lazy(() => import('./tabs/PgpTab'))
 
 const TAB_LABELS = {
-  chat:'💬 Chat', mail:'📧 Mail', encrypt:'📤 Send',
+  chat:'💬 Chat', encrypt:'📤 Send',
   decrypt:'📥 Receive', stego:'🖼️ Stego', pgp:'🤓 PGP',
   contacts:'👥 Friends', settings:'⚙️ Settings',
 }
@@ -28,7 +27,7 @@ const PLATFORM_BANNER_DISMISS_KEY = 'cute-platform-banner-dismissed'
 
 const detectDesktop = () => {
   const ua = globalThis.navigator?.userAgent?.toLowerCase() || '';
-  return ua.includes('electron') || !!globalThis.electronAPI || !!globalThis.__TAURI_IPC__ || ua.includes('tauri');
+  return ua.includes('electron') || !!globalThis.electronAPI || !!globalThis.__TAURI_INTERNALS__ || !!globalThis.__TAURI_IPC__ || ua.includes('tauri');
 }
 
 const isStandaloneDisplay = () => {
@@ -208,9 +207,8 @@ export default function App() { // NOSONAR
     identity, contacts,
     saveIdentity, saveContacts, clearIdentity, hasIdentity,
     peerStatus, myPeerId, queueStatus,
-    webOnline, mailUnreadCount,
-    activeChatContact, setActiveChatContact,
-    message, showMessage,
+    webOnline, activeChatContact, setActiveChatContact,
+    message, showMessage, clipboardRead,
     chatUnreadCounts, clearChatUnread,
     autoRead, setPgpModeEnabled,
     pgpModeEnabled,
@@ -306,9 +304,22 @@ export default function App() { // NOSONAR
   const [deferredPrompt, setDeferredPrompt] = useState(null)
   const [showInstallBanner, setShowInstallBanner] = useState(false)
   const [showPlatformBanner, setShowPlatformBanner] = useState(() => {
-    if (detectDesktop()) return false
-    const dismissed = localStorage.getItem(PLATFORM_BANNER_DISMISS_KEY) === 'true'
-    return !dismissed && !isStandaloneDisplay()
+    if (detectDesktop() || isStandaloneDisplay()) return false
+
+    // If coming from TWA (encapsulated APK), document.referrer is sometimes 'android-app://...'
+    if (document.referrer && document.referrer.includes('android-app://')) return false
+
+    const val = localStorage.getItem(PLATFORM_BANNER_DISMISS_KEY)
+    let dismissedAt = 0
+    const ONE_DAY = 24 * 60 * 60 * 1000
+    if (val === 'true') {
+      dismissedAt = Date.now() - ONE_DAY // Trigger now if coming from old 'true' string
+      localStorage.setItem(PLATFORM_BANNER_DISMISS_KEY, dismissedAt.toString()) 
+    } else if (val) {
+      dismissedAt = parseInt(val, 10) || 0
+    }
+    
+    return (Date.now() - dismissedAt > ONE_DAY)
   })
   const [showLinkModal, setShowLinkModal] = useState(false)
   const [linkStep, setLinkStep] = useState('scan')
@@ -369,7 +380,7 @@ export default function App() { // NOSONAR
   }, [isDesktop, showMessage])
 
   const dismissPlatformBanner = () => {
-    localStorage.setItem(PLATFORM_BANNER_DISMISS_KEY, 'true')
+    localStorage.setItem(PLATFORM_BANNER_DISMISS_KEY, Date.now().toString())
     setShowPlatformBanner(false)
   }
 
@@ -526,9 +537,9 @@ export default function App() { // NOSONAR
   useEffect(() => {
     const checkClipboard = async () => {
       if (!autoRead) return
-      if (!document.hasFocus()) return
+      if (!document.hasFocus() && !window.__TAURI_IPC__) return
       try {
-        const text = await globalThis.navigator.clipboard.readText()
+        const text = await clipboardRead()
         if (!text?.trim()) return
 
         if (text.includes('BEGIN PGP MESSAGE')) {
@@ -551,7 +562,7 @@ export default function App() { // NOSONAR
 
     globalThis.addEventListener('focus', checkClipboard)
     return () => globalThis.removeEventListener('focus', checkClipboard)
-  }, [autoRead, setActiveTab, setPgpModeEnabled, showMessage])
+  }, [autoRead, setActiveTab, setPgpModeEnabled, showMessage, clipboardRead])
 
   return (
     <>
@@ -596,7 +607,7 @@ export default function App() { // NOSONAR
             <button className="drawer-close-btn" onClick={() => setIsDrawerOpen(false)}>✕</button>
           </div>
           <div className="drawer-content">
-            {[['chat','💬','Chats'],['mail','📧','Mail'],['contacts','👥','Friends'],['stego','🖼️','Stego Image'],['encrypt','📤','Encrypt Tools'],['decrypt','📥','Decrypt Tools'],['settings','⚙️','Settings']].map(([t,icon,label]) => (
+            {[['chat','💬','Chats'],['contacts','👥','Friends'],['stego','🖼️','Stego Image'],['encrypt','📤','Encrypt Tools'],['decrypt','📥','Decrypt Tools'],['settings','⚙️','Settings']].map(([t,icon,label]) => (
               <button 
                 key={t} 
                 className={`drawer-item ${activeTab===t ? 'active' : ''}`}
@@ -609,11 +620,6 @@ export default function App() { // NOSONAR
                   <span className="drawer-item-icon">{icon}</span>
                   <span className="drawer-item-label">{label}</span>
                 </div>
-                {t === 'mail' && mailUnreadCount > 0 && (
-                  <span className="chat-unread-badge" style={{ position: 'relative', transform: 'none', marginLeft: 'auto' }}>
-                    {mailUnreadCount}
-                  </span>
-                )}
               </button>
             ))}
             {pgpModeEnabled && (
@@ -626,7 +632,7 @@ export default function App() { // NOSONAR
         </div>
         {/* --- End Drawer Menu --- */}
 
-        <section className={`messenger-app-shell active-tab-${activeTab} ${activeChatContact || activeTab === 'mail' ? 'has-active-chat' : 'no-active-chat'}`}>
+        <section className={`messenger-app-shell active-tab-${activeTab} ${activeChatContact  ? 'has-active-chat' : 'no-active-chat'}`}>
           {/* ── Left sidebar ── */}
           <aside className="messenger-primary-nav" aria-label="Primary Navigation">
             <div className="nav-profile-header">
@@ -781,7 +787,7 @@ export default function App() { // NOSONAR
                   />
                 </div>
                 <Suspense fallback={<div style={{padding:20}}>Loading...</div>}>
-                  <div id="mail-tab"  className={`tab-pane${activeTab==='mail'  ?' active':''}`}>{activeTab==='mail'  && <MailTab />}</div>
+                  
                   <div id="stego-tab" className={`tab-pane${activeTab==='stego' ?' active':''}`}>{activeTab==='stego' && <StegoTab />}</div>
                   {pgpModeEnabled && (
                     <div id="pgp-tab" className={`tab-pane${activeTab==='pgp'   ?' active':''}`}>{activeTab==='pgp'   && <PgpTab />}</div>

@@ -3,7 +3,7 @@ import { useApp } from '../context/AppContext'
 import forgeLib from 'node-forge'
 
 export default function ContactsTab() {
-  const { contacts, saveContacts, identity, showMessage } = useApp()
+  const { contacts, saveContacts, identity, showMessage  , clipboardWrite } = useApp()
   const [name, setName] = useState('')
   const [keyText, setKeyText] = useState('')
   const importFileRef = useRef()
@@ -132,7 +132,7 @@ export default function ContactsTab() {
             </div>
             <div className="contact-actions">
               <button className="btn-secondary btn-small"
-                onClick={() => { navigator.clipboard.writeText(c.publicKey); showMessage('Key copied!', 'success') }}>
+                onClick={() => { clipboardWrite(c.publicKey); showMessage('Key copied!', 'success') }}>
                 📋
               </button>
               <button className="btn-secondary btn-small" onClick={() => removeContact(c.name)}>🗑️</button>
@@ -145,7 +145,7 @@ export default function ContactsTab() {
         <p className="setting-label">📋 Your Identity (Share with friends)</p>
         <textarea readOnly value={myPubKey} placeholder="No identity found. Create New Identity." />
         <div className="actions">
-          <button className="btn-secondary" onClick={() => { navigator.clipboard.writeText(myPubKey); showMessage('Key copied!', 'success') }}>
+          <button className="btn-secondary" onClick={() => { clipboardWrite(myPubKey); showMessage('Key copied!', 'success') }}>
             📋 Copy
           </button>
           <button className="btn-secondary" onClick={exportEncryptedPublicKey}>

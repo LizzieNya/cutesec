@@ -3,7 +3,7 @@ import { useApp } from '../context/AppContext'
 import { useCrypto } from '../hooks/useCrypto'
 
 export default function EncryptTab() {
-  const { contacts, identity, showMessage, playSound } = useApp()
+  const { contacts, identity, showMessage, playSound  , clipboardWrite } = useApp()
   const { encryptForMultiple } = useCrypto()
   const [selectedContacts, setSelectedContacts] = useState([])
   const [message, setMessage] = useState('')
@@ -40,26 +40,24 @@ export default function EncryptTab() {
   const copyAll = () => {
     if (!results) return
     const text = Object.entries(results).map(([n, v]) => `// ${n}\n${v}`).join('\n\n')
-    navigator.clipboard.writeText(text)
+    clipboardWrite(text)
     showMessage('Copied all! 📋', 'success')
   }
 
   return (
     <div className="tab-pane-inner" style={{ padding: '16px' }}>
-      <div className="input-group">
-        <label htmlFor="encryptRecipientsSelect">👩‍❤️‍👨 Send to Friends:</label>
-        <select
-          id="encryptRecipientsSelect"
-          className="contact-select"
-          multiple
-          size={Math.min(4, contacts.length + 1)}
-          value={selectedContacts}
-          onChange={e => setSelectedContacts([...e.target.selectedOptions].map(o => o.value))}
-        >
-          {identity?.publicKey && <option value="Note to Self">Note to Self 💖</option>}
-          {contacts.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
-        </select>
-        <div className="selection-info">Hold Ctrl/Cmd to select multiple</div>
+<div className="stego-recipients">
+          <label htmlFor="encryptRecipientsSelect">👩‍❤️‍👨 Send to Friends:</label>
+          <select
+            id="encryptRecipientsSelect"
+            multiple
+            value={selectedContacts}
+            onChange={e => setSelectedContacts([...e.target.selectedOptions].map(o => o.value))}
+          >
+            {identity?.publicKey && <option value="Note to Self">Note to Self 💖</option>}
+            {contacts.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+          </select>
+          <div className="stego-recipients-hint">Hold Ctrl/Cmd to select multiple.</div>
       </div>
 
       <div className="input-group">
@@ -107,7 +105,7 @@ export default function EncryptTab() {
                 <textarea readOnly value={enc || 'Encryption failed'} style={{ height: 80, fontSize: '0.75em', fontFamily: 'monospace' }} />
                 <button className="btn-secondary btn-small"
                   style={{ position: 'absolute', top: 6, right: 6 }}
-                  onClick={() => { navigator.clipboard.writeText(enc); showMessage('Copied!', 'success') }}>
+                  onClick={() => { clipboardWrite(enc); showMessage('Copied!', 'success') }}>
                   📋
                 </button>
               </div>

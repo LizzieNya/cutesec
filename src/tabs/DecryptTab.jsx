@@ -2,14 +2,14 @@ import { useEffect, useState } from 'react'
 import { useApp } from '../context/AppContext'
 import { useCrypto } from '../hooks/useCrypto'
 
-async function copyTextWithFallback(text, showMessage, successText = 'Copied!') {
+async function copyTextWithFallback(text, showMessage, clipboardWrite, successText = 'Copied!') {
   if (!text) {
     showMessage('Nothing to copy', 'info')
     return false
   }
 
   try {
-    await globalThis.navigator.clipboard.writeText(text)
+    await clipboardWrite(text)
     showMessage(successText, 'success')
     return true
   } catch {
@@ -35,7 +35,7 @@ async function copyTextWithFallback(text, showMessage, successText = 'Copied!') 
 }
 
 export default function DecryptTab() {
-  const { showMessage, autoCopy, playSound } = useApp()
+  const { showMessage, autoCopy, playSound  , clipboardWrite } = useApp()
   const { decryptMessage } = useCrypto()
   const [input, setInput] = useState('')
   const [output, setOutput] = useState('')
@@ -68,7 +68,7 @@ export default function DecryptTab() {
         setOutput(dec)
         setOutputImg(null)
       }
-      if (autoCopy) await copyTextWithFallback(dec, showMessage, 'Decrypted result copied 📋')
+      if (autoCopy) await copyTextWithFallback(dec, showMessage, clipboardWrite, 'Decrypted result copied 📋')
       showMessage('Decrypted! 💖', 'success')
       playSound('receive')
     } catch (e) {
@@ -90,7 +90,7 @@ export default function DecryptTab() {
       </div>
       <div className="actions">
         <button className="btn-primary" onClick={handleDecrypt}>🔓 Decrypt</button>
-        <button className="btn-secondary" onClick={() => copyTextWithFallback(output, showMessage)}>
+        <button className="btn-secondary" onClick={() => copyTextWithFallback(output, showMessage, clipboardWrite)}>
           📋 Copy Result
         </button>
       </div>

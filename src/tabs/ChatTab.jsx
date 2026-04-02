@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useApp, DB } from '../context/AppContext'
 import { useCrypto } from '../hooks/useCrypto'
 import forgeLib from 'node-forge'
+import localforage from 'localforage'
 
 function getPeerIdFromPublicKey(pubKeyPem) {
   if (!pubKeyPem) return ''
@@ -24,13 +25,16 @@ export default function ChatTab() {
     chatOperationalNotice,
     playSound,
     incrementChatUnread,
-    clearChatUnread
+    clearChatUnread,
+    autoRead,
+    clipboardWrite, clipboardRead
   } = useApp()
   const { encryptForRecipient, decryptMessage } = useCrypto()
   const [messages, setMessages] = useState([])
   const [inputText, setInputText] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [attachImg, setAttachImg] = useState(null)
+  const [zoomedImg, setZoomedImg] = useState(null)
   const messagesEndRef = useRef()
   const fileRef = useRef()
 
@@ -39,14 +43,14 @@ export default function ChatTab() {
   // Load messages when contact changes
   useEffect(() => {
     if (!historyKey) return
-    const saved = DB.get(historyKey) || []
     let cancelled = false
-    Promise.resolve().then(() => {
+    localforage.getItem(historyKey).then((saved) => {
+      saved = saved || []
       if (!cancelled) {
         setMessages(saved)
         clearChatUnread(activeChatContact)
-        
-        // If we have messages from them that we never read (we can infer this if needed, 
+
+        // If we have messages from them that we never read (we can infer this if needed,
         // but let's just send a bulk READ receipt for any non-read messages from them).
         const contactName = activeChatContact
         const contact = contacts.find(c => c.name === contactName)
@@ -62,7 +66,7 @@ export default function ChatTab() {
             })
             // Mark them locally so we don't resend read receipts
             const updated = saved.map(m => unreadIds.includes(m.id) ? { ...m, readAckSent: true } : m)
-            DB.set(historyKey, updated)
+            localforage.setItem(historyKey, updated)
             setMessages(updated)
           }
         }
@@ -78,10 +82,10 @@ export default function ChatTab() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  const saveMessages = (msgs) => {
+  const saveMessages = async (msgs) => {
     setMessages(msgs)
     if (historyKey) {
-      DB.set(historyKey, msgs)
+      await localforage.setItem(historyKey, msgs)
       globalThis.dispatchEvent(new Event('cute-data-updated'))
     }
   }
@@ -110,9 +114,9 @@ export default function ChatTab() {
     return groups
   }
 
-  const retryMessage = (contactName, msgId) => {
+  const retryMessage = async (contactName, msgId) => {
     const key = `chat_history_${contactName}`
-    const history = DB.get(key) || []
+    const history = await localforage.getItem(key) || []
     const idx = history.findIndex((m) => m.id === msgId)
     if (idx < 0) return
     const msg = history[idx]
@@ -125,11 +129,11 @@ export default function ChatTab() {
           msgId,
           senderKey: identity?.publicKey,
           payload: msg.encrypted,
-          timestamp: new Date().toISOString(),
+                timestamp: new Date(msg.ts || msg.id).toISOString(),
         })
       : false
     history[idx] = { ...msg, deliveryStatus: wasSent ? 'sent' : 'pending' }
-    DB.set(key, history)
+    await localforage.setItem(key, history)
     if (activeChatContact === contactName) setMessages(history)
     showMessage(wasSent ? 'Message re-sent via P2P ⚡' : 'Friend still offline, message remains pending', wasSent ? 'success' : 'info')
   }
@@ -137,7 +141,7 @@ export default function ChatTab() {
   const pasteFromClipboard = async () => {
     if (!activeChatContact) return
     try {
-      const text = await globalThis.navigator.clipboard.readText()
+      const text = await clipboardRead()
       if (!text?.trim()) {
         showMessage('Clipboard is empty', 'info')
         return
@@ -289,7 +293,7 @@ export default function ChatTab() {
       }
       saveMessages([...messages, msg])
       try {
-        await globalThis.navigator.clipboard.writeText(encrypted)
+        await clipboardWrite(encrypted)
       } catch {
         // Clipboard is optional; keep message flow working even if denied.
       }
@@ -305,7 +309,7 @@ export default function ChatTab() {
   }
 
   useEffect(() => {
-    const onPeerData = (event) => {
+const onPeerData = async (event) => {
       const payload = event.detail?.data
       const remotePeerId = event.detail?.remotePeerId
 
@@ -313,14 +317,14 @@ export default function ChatTab() {
         const normalizeKey = (k) => (k || '').replace(/\s+/g, '')
         const sender = contacts.find((c) => normalizeKey(c.publicKey) === normalizeKey(payload.senderKey))
         if (!sender) return
-        
+
         const key = `chat_history_${sender.name}`
-        const prev = DB.get(key) || []
-        
+        const prev = await localforage.getItem(key) || []
+
         let changed = false
         const next = prev.map(m => {
           if (m.sender !== 'me') return m
-          
+
           if (payload.type === 'CHAT_MSG_READ_BULK' && payload.msgIds?.includes(m.id)) {
             if (m.deliveryStatus !== 'read') {
               changed = true
@@ -335,9 +339,9 @@ export default function ChatTab() {
           }
           return m
         })
-        
+
         if (changed) {
-          DB.set(key, next)
+          await localforage.setItem(key, next)
           if (activeChatContact === sender.name) setMessages(next)
         }
         return
@@ -364,32 +368,36 @@ export default function ChatTab() {
       }
 
       try {
-        const decrypted = decryptMessage(payload.payload)
-        let text = decrypted
+        let text = null
         let img = null
-        try {
-          const parsed = JSON.parse(decrypted)
-          if (parsed && (parsed.text !== undefined || parsed.img !== undefined)) {
-            text = parsed.text || ''
-            img = parsed.img || null
+
+        if (autoRead) {
+          const decrypted = decryptMessage(payload.payload)
+          text = decrypted
+          try {
+            const parsed = JSON.parse(decrypted)
+            if (parsed && (parsed.text !== undefined || parsed.img !== undefined)) {
+              text = parsed.text || ''
+              img = parsed.img || null
+            }
+          } catch {
+            // Keep plain text format
           }
-        } catch {
-          // Keep plain text format
         }
 
         const key = `chat_history_${sender.name}`
-        const prev = DB.get(key) || []
+        const prev = await localforage.getItem(key) || []
         const isCurrentlyOpen = activeChatContact === sender.name
         const next = [...prev, {
           id: payload.msgId || Date.now() + Math.floor(Math.random() * 1000), // ensure ID sync
           sender: 'them',
           content: text,
-          img,
+          img: img,
           encrypted: payload.payload,
-          ts: Date.now(),
-          readAckSent: isCurrentlyOpen
+          ts: payload.timestamp ? new Date(payload.timestamp).getTime() : Date.now(),
+            readAckSent: isCurrentlyOpen
         }]
-        DB.set(key, next)
+        await localforage.setItem(key, next)
         if (isCurrentlyOpen) {
           setMessages(next)
         } else {
@@ -404,39 +412,63 @@ export default function ChatTab() {
 
     globalThis.addEventListener('cute-peer-data', onPeerData)
     return () => globalThis.removeEventListener('cute-peer-data', onPeerData)
-  }, [activeChatContact, contacts, decryptMessage, playSound, showMessage, incrementChatUnread])
+  }, [activeChatContact, contacts, decryptMessage, playSound, showMessage, incrementChatUnread, identity?.publicKey, autoRead])
 
   useEffect(() => {
-    const retryPendingChats = () => {
+    const retryPendingChats = async () => {
       if (typeof globalThis.cuteSendToPeer !== 'function') return
-      for (const key of Object.keys(localStorage)) {
-        if (!key.startsWith('chat_history_')) continue
-        const contactName = key.replace('chat_history_', '')
-        const contact = contacts.find((c) => c.name === contactName)
-        if (!contact) continue
-        const remotePeerId = getPeerIdFromPublicKey(contact.publicKey)
-        const history = DB.get(key) || []
-        let changed = false
-        const next = history.map((msg) => {
-          if (msg.sender !== 'me' || msg.deliveryStatus !== 'pending' || !msg.encrypted) return msg
-          const wasSent = globalThis.cuteSendToPeer(remotePeerId, {
-            type: 'encrypted-message',
-            msgId: msg.id,
-            senderKey: identity?.publicKey,
-            payload: msg.encrypted,
-            timestamp: new Date().toISOString(),
-          })
-          if (wasSent) changed = true
-          return { ...msg, deliveryStatus: wasSent ? 'sent' : 'pending' }
-        })
-        if (changed) {
-          DB.set(key, next)
-          if (activeChatContact === contactName) setMessages(next)
+      try {
+        const keys = await localforage.keys()
+        for (const key of keys) {
+          if (!key.startsWith('chat_history_')) continue
+          const contactName = key.replace('chat_history_', '')
+          const contact = contacts.find((c) => c.name === contactName)
+          if (!contact) continue
+          const remotePeerId = getPeerIdFromPublicKey(contact.publicKey)
+          const history = await localforage.getItem(key) || []
+          let pendingMsgs = history.filter(msg =>
+            msg.sender === 'me' &&
+            (msg.deliveryStatus === 'pending' || msg.deliveryStatus === 'sent') &&
+            msg.encrypted
+          )
+
+          if (pendingMsgs.length === 0) continue
+
+          for (let i = 0; i < pendingMsgs.length; i++) {
+            const msg = pendingMsgs[i]
+            if (i > 0) {
+              await new Promise(r => setTimeout(r, 400))
+            }
+
+            const wasSent = globalThis.cuteSendToPeer(remotePeerId, {
+              type: 'encrypted-message',
+              msgId: msg.id,
+              senderKey: identity?.publicKey,
+              payload: msg.encrypted,
+              timestamp: new Date(msg.ts || msg.id).toISOString(),
+            })
+
+            if (wasSent) {
+              const currentHistory = await localforage.getItem(key) || []
+              const idx = currentHistory.findIndex(m => m.id === msg.id)
+              if (idx >= 0 && currentHistory[idx].deliveryStatus !== 'read' && currentHistory[idx].deliveryStatus !== 'delivered') {
+                currentHistory[idx] = { ...currentHistory[idx], deliveryStatus: 'sent' }
+                await localforage.setItem(key, currentHistory)
+                if (activeChatContact === contactName) setMessages(currentHistory)
+              }
+            }
+          }
         }
+      } catch {
+        // ignore
       }
     }
     globalThis.addEventListener('cute-peer-online', retryPendingChats)
-    return () => globalThis.removeEventListener('cute-peer-online', retryPendingChats)
+    const peerStartCheck = setTimeout(retryPendingChats, 2500)
+    return () => {
+      globalThis.removeEventListener('cute-peer-online', retryPendingChats)
+      clearTimeout(peerStartCheck)
+    }
   }, [activeChatContact, contacts, identity?.publicKey])
 
   const filteredContacts = contacts.filter(c =>
@@ -481,7 +513,7 @@ export default function ChatTab() {
               title="Copy Peer ID"
               onClick={async () => {
                 if (!myPeerId) return showMessage('Peer ID unavailable', 'error')
-                await navigator.clipboard.writeText(myPeerId)
+                await clipboardWrite(myPeerId)
                 showMessage('Peer ID copied 📋', 'success')
               }}
             >
@@ -531,6 +563,9 @@ export default function ChatTab() {
             </button>
           ))}
         </div>
+        <div style={{ padding: '12px 10px', fontSize: '11px', color: '#999', background: 'rgba(255,255,255,0.02)', textAlign: 'center', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+          ⚠️ <b>Burner Mode (OTR):</b> P2P messages remain pending 🕒 until both users are actively online.
+        </div>
       </div>
 
       {/* Chat main area */}
@@ -542,7 +577,7 @@ export default function ChatTab() {
               <div className="chat-header-avatar">{activeChatContact[0].toUpperCase()}</div>
               <div className="chat-header-info">
                 <div className="chat-header-name">{activeChatContact}</div>
-                <div className="chat-header-status">🔒 End-to-End Encrypted</div>
+                <div className="chat-header-status" title="Burner Mode: messages pend 🕒 until you are both actively online" style={{ cursor: 'help' }}>🔒 E2E Encrypted (Burner P2P)</div>
               </div>
               <div className="chat-header-actions">
                 <button className="btn-secondary btn-small" onClick={pasteFromClipboard}>📋</button>
@@ -551,7 +586,7 @@ export default function ChatTab() {
                   className="btn-secondary btn-small"
                   onClick={() => {
                     if (!myPeerId) return showMessage('Peer ID unavailable', 'error')
-                    globalThis.navigator.clipboard.writeText(myPeerId)
+                    clipboardWrite(myPeerId)
                     showMessage('Peer ID copied 📋', 'success')
                   }}
                 >
@@ -581,7 +616,7 @@ export default function ChatTab() {
                 return (
                   <div key={msg.id} className={`chat-bubble-row ${msg.sender === 'me' ? 'sent' : 'received'}`}>
                     <div className="chat-bubble">
-                      {!msg.content && msg.sender === 'them' && msg.encrypted && (
+                        {msg.content === null && msg.img === null && msg.sender === 'them' && msg.encrypted && (
                         <button
                           className="btn-secondary btn-small"
                           style={{ marginBottom: 6 }}
@@ -591,7 +626,22 @@ export default function ChatTab() {
                         </button>
                       )}
                       {msg.content && <p>{msg.content}</p>}
-                      {msg.img && <img src={msg.img} alt="attachment" style={{ maxWidth: '100%', borderRadius: 8, marginTop: 4 }} />}
+                      {msg.img && (
+                        <img 
+                          src={msg.img} 
+                          alt="attachment" 
+                          onClick={() => setZoomedImg(msg.img)}
+                          style={{ 
+                            width: 140, 
+                            height: 140, 
+                            objectFit: 'cover', 
+                            borderRadius: 8, 
+                            marginTop: 4, 
+                            cursor: 'zoom-in',
+                            border: '1px solid rgba(255,105,180,0.3)' 
+                          }} 
+                        />
+                      )}
                       {msg.sender === 'me' && msg.deliveryStatus === 'pending' && activeChatContact !== 'Note to Self' && (
                         <button
                           className="btn-secondary btn-small"
@@ -604,10 +654,19 @@ export default function ChatTab() {
                       <span className="chat-ts">
                         {new Date(msg.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         {msg.sender === 'me' && activeChatContact !== 'Note to Self' && (
-                          <span className="chat-ticks" style={{ marginLeft: 6, fontSize: '1.2em', verticalAlign: 'middle', userSelect: 'none' }}>
+                          <span 
+                            className="chat-ticks" 
+                            style={{ marginLeft: 6, fontSize: '1.2em', verticalAlign: 'middle', userSelect: 'none', cursor: 'help' }}
+                            title={
+                              msg.deliveryStatus === 'read' ? 'Read by recipient' :
+                              msg.deliveryStatus === 'delivered' ? 'Delivered safely' :
+                              msg.deliveryStatus === 'sent' ? 'Sent to network' : 
+                              'Pending (Your friend must be online for this to deliver)'
+                            }
+                          >
                             {msg.deliveryStatus === 'read' ? <span style={{ color: '#34B7F1' }}>✓✓</span> :
-                             msg.deliveryStatus === 'delivered' ? '✓✓' :
-                             msg.deliveryStatus === 'sent' ? '✓' : '⌚'}
+                             msg.deliveryStatus === 'delivered' ? '✓✓' :        
+                             msg.deliveryStatus === 'sent' ? '✓' : '🕒'}
                           </span>
                         )}
                       </span>
@@ -617,6 +676,53 @@ export default function ChatTab() {
               })}
               <div ref={messagesEndRef} />
             </div>
+
+            {zoomedImg && (
+              <div 
+                style={{
+                  position: 'fixed',
+                  top: 0, left: 0, right: 0, bottom: 0,
+                  backgroundColor: 'rgba(0, 0, 0, 0.85)',
+                  zIndex: 10000,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'zoom-out',
+                  padding: 20
+                }}
+                onClick={() => setZoomedImg(null)}
+              >
+                <img 
+                  src={zoomedImg} 
+                  alt="Zoomed" 
+                  style={{
+                    maxWidth: '100%',
+                    maxHeight: '100%',
+                    objectFit: 'contain',
+                    borderRadius: 12,
+                    boxShadow: '0 8px 30px rgba(0,0,0,0.5)'
+                  }} 
+                />
+                <button 
+                  style={{
+                    position: 'absolute',
+                    top: 30, right: 30,
+                    background: 'rgba(255,255,255,0.2)',
+                    border: 'none',
+                    color: 'white',
+                    fontSize: 24,
+                    width: 44, height: 44,
+                    borderRadius: '50%',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+            )}
 
             <div className="chat-composer">
               {attachImg && (
@@ -636,8 +742,13 @@ export default function ChatTab() {
                     const f = e.target.files[0]
                     if (!f) return
                     const r = new FileReader()
-                    r.onload = ev => setAttachImg(ev.target.result)
-                    r.readAsDataURL(f)
+                      const MAX_SIZE_MB = 15
+                      if (f.size > MAX_SIZE_MB * 1024 * 1024) {
+                        showMessage(`Image exceeds ${MAX_SIZE_MB}MB limit ⚠️`, "error")
+                        return
+                      }
+                      r.onload = ev => setAttachImg(ev.target.result)
+                      r.readAsDataURL(f)
                   }}
                 />
                 <textarea
@@ -661,9 +772,14 @@ export default function ChatTab() {
             <div className="chat-empty-icon">💬</div>
             <h3>Select a friend to chat</h3>
             <p>Messages are auto-encrypted with RSA-2048 + AES-256-GCM and sent P2P via WebRTC</p>
+            <div style={{ marginTop: '20px', padding: '15px', background: 'rgba(255, 255, 255, 0.05)', borderRadius: '10px', fontSize: '0.9em', maxWidth: '400px', textAlign: 'center', lineHeight: '1.4' }}>
+              <strong>⚠️ Burner Mode (OTR)</strong><br />
+              <div style={{ marginTop: '8px', color: '#bbb' }}>CuteSecure is 100% decentralized. There are no corporate servers saving your chats while offline. Sent messages will remain pending 🕒 locally until your friend connects at the same time to receive them.</div>
+            </div>
           </div>
         )}
       </div>
     </div>
   )
 }
+

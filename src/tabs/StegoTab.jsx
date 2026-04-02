@@ -75,7 +75,7 @@ async function autoResizeSecret(sourceURL, capacityBits) {
     const img = new Image()
     img.onload = () => {
       let low = 0.01;
-      let high = 1.0;
+      let high = 1;
       let bestFit = null;
       let attempts = 0;
       

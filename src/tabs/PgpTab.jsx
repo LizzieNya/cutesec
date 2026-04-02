@@ -2,14 +2,14 @@ import { useState, useEffect } from 'react'
 import { useApp, DB } from '../context/AppContext'
 import * as openpgpLib from 'openpgp'
 
-async function copyTextWithFallback(text, showMessage, successText = 'Copied!') {
+async function copyTextWithFallback(text, showMessage, clipboardWrite, successText = 'Copied!') {
   if (!text) {
     showMessage('Nothing to copy', 'info')
     return false
   }
 
   try {
-    await globalThis.navigator.clipboard.writeText(text)
+    await clipboardWrite(text)
     showMessage(successText, 'success')
     return true
   } catch {
@@ -50,7 +50,7 @@ function downloadTextFile(fileName, content) {
 }
 
 export default function PgpTab() {
-  const { showMessage, playSound } = useApp()
+  const { showMessage, playSound  , clipboardWrite } = useApp()
   const openpgp = globalThis.openpgp || openpgpLib
 
   const [myKeys,    setMyKeys]    = useState(getPgpMyKeys)
@@ -206,7 +206,7 @@ export default function PgpTab() {
                 <div style={{ fontSize: '0.75em', color: '#9a89b3' }}>{k.email}</div>
                 <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
                   <button className="btn-secondary btn-small"
-                    onClick={() => copyTextWithFallback(k.publicKey, showMessage, 'Public key copied!')}>📋</button>
+                    onClick={() => copyTextWithFallback(k.publicKey, showMessage, clipboardWrite, 'Key copied!')}>📋</button>
                   <button className="btn-secondary btn-small"
                     onClick={() => downloadTextFile(`pgp_${k.name.replaceAll(/\s+/g, '_')}_public.asc`, k.publicKey)}>⬇️ Pub</button>
                   <button className="btn-secondary btn-small"
@@ -224,7 +224,7 @@ export default function PgpTab() {
                 <strong style={{ fontSize: '0.85em' }}>{c.name}</strong>
                 <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
                   <button className="btn-secondary btn-small"
-                    onClick={() => copyTextWithFallback(c.publicKey, showMessage, 'Contact public key copied!')}>📋</button>
+                    onClick={() => copyTextWithFallback(c.publicKey, showMessage, clipboardWrite, 'Key copied!')}>📋</button>
                   <button className="btn-secondary btn-small" onClick={() => removeContact(c.id)}>🗑️</button>
                 </div>
               </div>
@@ -240,12 +240,13 @@ export default function PgpTab() {
             <h3>📝 PGP Message</h3>
             <textarea value={input} onChange={e => setInput(e.target.value)} placeholder="Type message or paste PGP block..." />
             <div className="pgp-controls">
-              <div className="pgp-recipients">
-                <label htmlFor="pgpRecipientSelect">To:</label>
-                <select id="pgpRecipientSelect" multiple value={selectedRecipients}
-                  onChange={e => setSelectedRecipients([...e.target.selectedOptions].map(o => o.value))}>
-                  {allRecipients.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}
-                </select>
+                <div className="stego-recipients">
+                  <label htmlFor="pgpRecipientSelect">To:</label>
+                  <select id="pgpRecipientSelect" multiple value={selectedRecipients}
+                    onChange={e => setSelectedRecipients([...e.target.selectedOptions].map(o => o.value))}>
+                    {allRecipients.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}
+                  </select>
+                  <div className="stego-recipients-hint">Hold Ctrl/Cmd to select multiple.</div>
               </div>
               <div className="pgp-actions">
                 <button className="btn-primary" onClick={encrypt}>🔒 Encrypt</button>
@@ -259,7 +260,7 @@ export default function PgpTab() {
               <h3>📄 Result</h3>
               <textarea readOnly value={output} />
               <button className="btn-secondary btn-small"
-                onClick={() => copyTextWithFallback(output, showMessage)}>📋 Copy</button>
+                onClick={() => copyTextWithFallback(output, showMessage, clipboardWrite, 'Copied!')}>📋 Copy</button>
             </div>
           )}
 

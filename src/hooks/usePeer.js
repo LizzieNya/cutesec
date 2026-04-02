@@ -66,9 +66,8 @@ export function usePeer({ onMessage } = {}) {
           }, 5000)
         } else if (err.type === 'network' || err.type === 'server-error') {
           console.warn(`[usePeer] Network error with PeerJS server (Possible rate limit ban). Waiting 5s...`, err)
-        } else {
-          setPeerStatus('error')
-          console.warn('PeerJS error:', err)
+        } else if (err.type === 'peer-unavailable') {
+          console.log(`[usePeer] Note: attempted to connect to an offline peer.`)
         }
       })
 
@@ -78,6 +77,7 @@ export function usePeer({ onMessage } = {}) {
         conn.on('open', () => {
           console.log(`[usePeer] Incoming connection OPEN from: ${conn.peer}`)
           connectionsRef.current[conn.peer] = conn
+            globalThis.dispatchEvent(new CustomEvent('cute-peer-online', { detail: conn.peer }))
         })
         conn.on('error', (err) => {
           console.error(`[usePeer] Error in incoming connection from ${conn.peer}:`, err)
@@ -111,6 +111,7 @@ export function usePeer({ onMessage } = {}) {
     conn.on('open', () => { 
       console.log(`[usePeer] Outbound connection OPENED to ${remotePeerId}`)
       connectionsRef.current[remotePeerId] = conn 
+        globalThis.dispatchEvent(new CustomEvent('cute-peer-online', { detail: remotePeerId }))
     })
     conn.on('error', (err) => {
       console.error(`[usePeer] Connection ERROR to ${remotePeerId}:`, err)
@@ -146,8 +147,8 @@ export function usePeer({ onMessage } = {}) {
       setTimeout(() => {
         if (!opened) console.warn(`[usePeer] Timeout: Connection to ${remotePeerId} never opened for queued data.`);
       }, 10000)
-      
-      return true
+
+      return false // Pending status
     }
     return false
   }, [connectTo])

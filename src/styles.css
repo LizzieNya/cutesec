@@ -676,8 +676,8 @@ textarea:focus {
 
 .message {
   position: fixed;
-  top: env(safe-area-inset-top, 12px);
-  margin-top: 12px;
+  top: auto;
+  bottom: 80px; /* Right above the bottom navigation bar */
   left: 50%;
   transform: translateX(-50%);
   width: min(92vw, 680px);
@@ -696,7 +696,7 @@ textarea:focus {
 
 @keyframes slideIn {
   from {
-    transform: translate(-50%, -10px);
+    transform: translate(-50%, 10px);
     opacity: 0;
   }
   to {
@@ -2756,6 +2756,7 @@ body.is-desktop .key-status h3 {
 
 body.is-desktop .message {
   max-width: 450px;
+  bottom: 20px;
 }
 
 body.is-desktop #installBanner,
@@ -5094,8 +5095,8 @@ body.is-resizing-shell * {
 
 @media (max-width: 768px) {
   .message {
-    top: auto;
-    bottom: 24px;
+    bottom: 80px;
+    z-index: 1000;
     animation: slideUpMsg 0.3s ease;
   }
 }

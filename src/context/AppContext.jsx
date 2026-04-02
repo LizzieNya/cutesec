@@ -1,4 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react'
+import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification'
+import { writeText, readText } from '@tauri-apps/plugin-clipboard-manager'
+import localforage from 'localforage'
 
 const AppContext = createContext(null)
 
@@ -43,9 +46,7 @@ export function AppProvider({ children }) { // NOSONAR
   const [queueStatus, setQueueStatus] = useState('No pending delivery')
   const [webOnline, setWebOnline] = useState(() => globalThis.navigator?.onLine ?? true)
   const [chatOperationalNotice, setChatOperationalNotice] = useState({ kind: 'info', text: 'Peer status unavailable' })
-  const [mailOperationalNotice, setMailOperationalNotice] = useState({ kind: 'info', text: 'Peer status unavailable' })
-  const [mailUnreadCount, setMailUnreadCount] = useState(0)
-
+    
   const [message, setMessage] = useState(null)
   const [activeChatContact, setActiveChatContact] = useState(null)
   
@@ -130,40 +131,35 @@ export function AppProvider({ children }) { // NOSONAR
     }
   }, [soundEnabled])
 
-  const refreshOperationalIndicators = useCallback(() => {
-    const getPendingChatCount = () => {
-      let total = 0
-      for (const key of Object.keys(localStorage)) {
+  const refreshOperationalIndicators = useCallback(async () => {
+    let chatPending = 0
+    try {
+      const keys = await localforage.keys()
+      for (const key of keys) {
         if (!key.startsWith('chat_history_')) continue
-        const msgs = DB.get(key) || []
-        total += msgs.filter((m) => m?.sender === 'me' && m?.deliveryStatus === 'pending').length
+        const msgs = await localforage.getItem(key) || []
+        chatPending += msgs.filter((m) => m?.sender === 'me' && m?.deliveryStatus === 'pending').length
       }
-      return total
+    } catch {
+      // ignore
     }
 
-    const mailbox = DB.get('cute_mailbox') || { inbox: [], sent: [] }
-    const mailPending = (mailbox.sent || []).filter((m) => m?.deliveryStatus === 'pending').length
-    const mailUnread = (mailbox.inbox || []).filter((m) => !m?.read).length
-    const chatPending = getPendingChatCount()
-    const totalPending = chatPending + mailPending
+    
+    
+            const totalPending = chatPending
     const currentlyWebOnline = globalThis.navigator?.onLine ?? true
     const realtimeOnline = currentlyWebOnline && peerStatus === 'online'
 
     setWebOnline(currentlyWebOnline)
-    setMailUnreadCount(mailUnread)
-    setQueueStatus(totalPending > 0
-      ? `${totalPending} pending (${chatPending} chat, ${mailPending} mail)`
-      : 'No pending delivery')
+    
+    setQueueStatus(totalPending > 0 ? `${totalPending} pending (chat)` : 'No pending delivery')
 
     if (!currentlyWebOnline) {
       setChatOperationalNotice({
         kind: 'warning',
         text: 'Web is offline. Messages stay encrypted and can be shared once connection returns.',
       })
-      setMailOperationalNotice({
-        kind: 'warning',
-        text: 'Web is offline. Mails remain queued in Sent until connectivity is restored.',
-      })
+      
       return
     }
 
@@ -172,10 +168,7 @@ export function AppProvider({ children }) { // NOSONAR
         kind: 'warning',
         text: `Peer not connected yet. ${chatPending} chat message(s) are waiting.`,
       })
-      setMailOperationalNotice({
-        kind: 'warning',
-        text: `Peer not connected yet. ${mailPending} mail(s) are waiting in Sent.`,
-      })
+      
       return
     }
 
@@ -184,12 +177,6 @@ export function AppProvider({ children }) { // NOSONAR
       text: chatPending > 0
         ? `Peer connected. ${chatPending} chat message(s) still pending manual resend.`
         : 'Peer connected. Real-time encrypted chat is ready.',
-    })
-    setMailOperationalNotice({
-      kind: 'success',
-      text: mailPending > 0
-        ? `Peer connected. ${mailPending} queued mail(s) still pending manual resend.`
-        : 'Peer connected. Mail delivery is available.',
     })
   }, [peerStatus])
 
@@ -240,10 +227,59 @@ export function AppProvider({ children }) { // NOSONAR
   useEffect(() => { DB.set('cute-sound', soundEnabled) }, [soundEnabled])
   useEffect(() => { DB.set('cute-pgp-mode', pgpModeEnabled) }, [pgpModeEnabled])
 
-  // ── Show toast message ──
-  const showMessage = useCallback((text, type = 'info', duration = 5000) => {
+  // ── Show toast message & Notification ──
+  const showMessage = useCallback((text, type = 'info', duration = 5000, skipNative = false) => {
     setMessage({ text, type })
     setTimeout(() => setMessage(null), duration)
+
+    if (!skipNative && window.__TAURI_IPC__ && (type === 'info' || type === 'success' || type === 'error')) {
+      isPermissionGranted().then(granted => {
+        if (granted) {
+          sendNotification({ title: 'CuteSec', body: text })
+        } else {
+          requestPermission().then(newPermission => {
+            if (newPermission === 'granted') {
+              sendNotification({ title: 'CuteSec', body: text })
+            }
+          })
+        }
+      }).catch(err => console.warn('Native notification error:', err))
+    }
+  }, [])
+
+  // ── Native Clipboard Hooks ──
+  const clipboardWrite = useCallback(async (text) => {
+    if (window.__TAURI_IPC__) {
+      try {
+        await writeText(text)
+        return true
+      } catch (e) {
+        console.warn('Native clipboard write failed:', e)
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(text)
+      return true
+    } catch (e) {
+      console.error('Web clipboard write failed:', e)
+      return false
+    }
+  }, [])
+
+  const clipboardRead = useCallback(async () => {
+    if (window.__TAURI_IPC__) {
+      try {
+        return await readText()
+      } catch (e) {
+        console.warn('Native clipboard read failed:', e)
+      }
+    }
+    try {
+      return await navigator.clipboard.readText()
+    } catch (e) {
+      console.error('Web clipboard read failed:', e)
+      return null
+    }
   }, [])
 
   // ── Save identity ──
@@ -252,16 +288,21 @@ export function AppProvider({ children }) { // NOSONAR
     setIdentity(keys)
   }, [])
 
-  const clearIdentity = useCallback(() => {
+  const clearIdentity = useCallback(async () => {
     DB.remove('cute_rsa_keys')
     DB.remove('cute_contacts')
     DB.remove('cute_chat_history')
     DB.remove('cute_mailbox')
-    DB.remove('cute_mail_inbox')
-    DB.remove('cute_mail_sent')
-    DB.remove('cute_mail_drafts')
-    for (const key of Object.keys(localStorage)) {
-      if (key.startsWith('chat_history_')) DB.remove(key)
+                try {
+      await localforage.removeItem('cute_mailbox')
+      const keys = await localforage.keys()
+      for (const key of keys) {
+        if (key.startsWith('chat_history_')) {
+          await localforage.removeItem(key)
+        }
+      }
+    } catch {
+      // ignore
     }
     setIdentity(null)
     setContacts([])
@@ -297,13 +338,13 @@ export function AppProvider({ children }) { // NOSONAR
     myPeerId, setMyPeerId,
     queueStatus, setQueueStatus,
     webOnline,
-    mailUnreadCount,
+    
     chatOperationalNotice,
-    mailOperationalNotice,
+    
     refreshOperationalIndicators,
     playSound,
     // UI
-    message, showMessage,
+    message, showMessage, clipboardWrite, clipboardRead,
     chatUnreadCounts, incrementChatUnread, clearChatUnread,
     activeChatContact, setActiveChatContact,
   }), [
@@ -323,12 +364,12 @@ export function AppProvider({ children }) { // NOSONAR
     myPeerId, setMyPeerId,
     queueStatus, setQueueStatus,
     webOnline,
-    mailUnreadCount,
+    
     chatOperationalNotice,
-    mailOperationalNotice,
+    
     refreshOperationalIndicators,
     playSound,
-    message, showMessage,
+    message, showMessage, clipboardWrite, clipboardRead,
     chatUnreadCounts, incrementChatUnread, clearChatUnread,
     activeChatContact, setActiveChatContact,
   ])
