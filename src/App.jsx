@@ -10,10 +10,13 @@ import EncryptTab from './tabs/EncryptTab'
 import DecryptTab from './tabs/DecryptTab'
 import ContactsTab from './tabs/ContactsTab'
 import SettingsTab from './tabs/SettingsTab'
+import TutorialOverlay from './components/TutorialOverlay'
 import './styles.css'
 
 const StegoTab = lazy(() => import('./tabs/StegoTab'))
 const PgpTab   = lazy(() => import('./tabs/PgpTab'))
+
+const TUTORIAL_DONE_KEY = 'cutesec-tutorial-done'
 
 const TAB_LABELS = {
   chat:'💬 Chat', encrypt:'📤 Send',
@@ -336,6 +339,20 @@ export default function App() { // NOSONAR
   const shellRef = useRef(null)
   useSidebarResize(shellRef)
 
+  // Tutorial: re-show if no identity; show once after identity is set (steps 2+3)
+  const [showTutorial, setShowTutorial] = useState(() => {
+    if (!hasIdentity) return true
+    return localStorage.getItem(TUTORIAL_DONE_KEY) !== 'true'
+  })
+  const handleTutorialDone = useCallback(() => {
+    localStorage.setItem(TUTORIAL_DONE_KEY, 'true')
+    setShowTutorial(false)
+  }, [])
+  const handleSkipIdentityStep = useCallback(() => {
+    // Don't mark done — will re-show next visit if still no identity
+    setShowTutorial(false)
+  }, [])
+
   const statusDotClass = webOnline
     ? ({ online:'online', connecting:'connecting', error:'error' }[peerStatus] || 'offline')
     : 'error'
@@ -566,6 +583,17 @@ export default function App() { // NOSONAR
 
   return (
     <>
+      {showTutorial && (
+        <TutorialOverlay
+          hasIdentity={hasIdentity}
+          saveIdentity={saveIdentity}
+          startLinkDevice={() => setShowLinkModal(true)}
+          setActiveTab={setActiveTab}
+          showMessage={showMessage}
+          onDone={handleTutorialDone}
+          onSkipIdentityStep={handleSkipIdentityStep}
+        />
+      )}
       {message && (
         <div className={`message ${message.type} message-${message.type}`} style={{ display: 'block' }}>
           {message.text}
