@@ -1,9 +1,9 @@
-# 🎀 Cute Secure Messenger v3.0
+# 🎀 Cute Secure Messenger v4.0
 
 A cute, pastel-themed secure messaging application with military-grade encryption (RSA-OAEP + AES-256-GCM).
 Now completely rewritten using **React, Vite, and Tauri v2** for a 100% unified codebase across **Desktop**, **Android (APK)**, and **Web (PWA)**! ✨
 
-## 🌟 New in v3.0 (The React & Tauri Architecture)
+## 🌟 New in v4.0 (The React & Tauri Architecture)
 
 - **⚛️ Total React Rewrite:** Moved from vanilla JS/Electron to a modern, lightning-fast React + Vite architecture.
 - **🦀 Tauri v2 Core:** We've replaced Electron and React Native! Now, a single codebase builds the Windows `.exe` and the Android `.apk`.
