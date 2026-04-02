@@ -47,7 +47,7 @@ export function useCrypto() {
     const pubKey   = forge.pki.publicKeyFromPem(recipientPublicKeyPem)
     const encKey   = pubKey.encrypt(aesKey, 'RSA-OAEP')
 
-    return JSON.stringify({
+    const jsonPayload = JSON.stringify({
       v: '2.0',
       encryptedKey: forge.util.encode64(encKey),
       iv:  forge.util.encode64(iv),
@@ -55,6 +55,7 @@ export function useCrypto() {
       data: forge.util.encode64(encryptedMsg),
       ts: Date.now(),
     })
+    return 'CUTESEC:' + btoa(jsonPayload)
   }, [])
 
   // ── Encrypt for multiple recipients ──
@@ -69,10 +70,16 @@ export function useCrypto() {
   }, [encryptForRecipient])
 
   // ── Decrypt ──
-  const decryptMessage = useCallback((encryptedJson) => {
+  const decryptMessage = useCallback((encryptedPayload) => {
     const forge = getForge()
     if (!identity?.privateKey) throw new Error('No private key')
-    const env     = JSON.parse(encryptedJson)
+    
+    let jsonString = encryptedPayload
+    if (typeof jsonString === 'string' && jsonString.startsWith('CUTESEC:')) {
+      jsonString = atob(jsonString.slice(8))
+    }
+    
+    const env     = JSON.parse(jsonString)
     const privKey = forge.pki.privateKeyFromPem(identity.privateKey)
     const aesKey  = privKey.decrypt(forge.util.decode64(env.encryptedKey), 'RSA-OAEP')
     const decipher = forge.cipher.createDecipher('AES-GCM', aesKey)
