@@ -292,6 +292,13 @@ export default function SettingsTab({ isDesktop = false, showInstallFromSettings
       </div>
 
       <div className="setting-item">
+        <p className="setting-label">✨ Credits</p>
+        <p style={{ fontSize: '0.9em', color: 'var(--text-secondary)' }}>
+          Built with 💖 by <strong>LizzieNya</strong> and <strong>Antigravity</strong>
+        </p>
+      </div>
+
+      <div className="setting-item">
         <p className="setting-label">🔐 Security</p>
         <button className="btn-danger" onClick={resetApp}>⚠️ Reset Everything</button>
       </div>
