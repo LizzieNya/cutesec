@@ -563,7 +563,7 @@ const onPeerData = async (event) => {
             </button>
           ))}
         </div>
-        <div style={{ padding: '12px 10px', fontSize: '11px', color: '#999', background: 'rgba(255,255,255,0.02)', textAlign: 'center', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+        <div style={{ padding: '12px 10px', fontSize: '11px', color: 'var(--text-secondary)', background: 'rgba(255,255,255,0.02)', textAlign: 'center', borderTop: '1px solid var(--border-soft)' }}>
           ⚠️ <b>Burner Mode (OTR):</b> P2P messages remain pending 🕒 until both users are actively online.
         </div>
       </div>
@@ -638,7 +638,7 @@ const onPeerData = async (event) => {
                             borderRadius: 8, 
                             marginTop: 4, 
                             cursor: 'zoom-in',
-                            border: '1px solid rgba(255,105,180,0.3)' 
+                            border: '1px solid var(--accent-border)' 
                           }} 
                         />
                       )}
@@ -664,7 +664,7 @@ const onPeerData = async (event) => {
                               'Pending (Your friend must be online for this to deliver)'
                             }
                           >
-                            {msg.deliveryStatus === 'read' ? <span style={{ color: '#34B7F1' }}>✓✓</span> :
+                            {msg.deliveryStatus === 'read' ? <span style={{ color: 'var(--accent)' }}>✓✓</span> :
                              msg.deliveryStatus === 'delivered' ? '✓✓' :        
                              msg.deliveryStatus === 'sent' ? '✓' : '🕒'}
                           </span>
@@ -774,7 +774,7 @@ const onPeerData = async (event) => {
             <p>Messages are auto-encrypted with RSA-2048 + AES-256-GCM and sent P2P via WebRTC</p>
             <div style={{ marginTop: '20px', padding: '15px', background: 'rgba(255, 255, 255, 0.05)', borderRadius: '10px', fontSize: '0.9em', maxWidth: '400px', textAlign: 'center', lineHeight: '1.4' }}>
               <strong>⚠️ Burner Mode (OTR)</strong><br />
-              <div style={{ marginTop: '8px', color: '#bbb' }}>CuteSecure is 100% decentralized. There are no corporate servers saving your chats while offline. Sent messages will remain pending 🕒 locally until your friend connects at the same time to receive them.</div>
+              <div style={{ marginTop: '8px', color: 'var(--text-secondary)' }}>CuteSecure is 100% decentralized. There are no corporate servers saving your chats while offline. Sent messages will remain pending 🕒 locally until your friend connects at the same time to receive them.</div>
             </div>
           </div>
         )}

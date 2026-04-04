@@ -27,7 +27,7 @@ const ACCENTS = [
 function Toggle({ id, checked, onChange, label }) { // NOSONAR
   return (
     <label htmlFor={id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, cursor: 'pointer' }}>
-      <span style={{ fontSize: '0.9em', color: '#666' }}>{label}</span>
+      <span style={{ fontSize: '0.9em', color: 'var(--text-secondary)' }}>{label}</span>
       <span className="toggle-switch" aria-hidden="true">
         <input type="checkbox" id={id} checked={checked} onChange={e => onChange(e.target.checked)} aria-label={label} />
         <span className="toggle-slider" />

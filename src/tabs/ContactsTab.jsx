@@ -120,13 +120,13 @@ export default function ContactsTab() {
 
       <h3 style={{ marginTop: 20 }}>Your Friends</h3>
       <div className="contacts-list" id="contactsContainer">
-        {contacts.length === 0 && <p style={{ color: '#9a89b3', textAlign: 'center', padding: 20 }}>No friends yet 💌</p>}
+        {contacts.length === 0 && <p style={{ color: 'var(--text-secondary)', textAlign: 'center', padding: 20 }}>No friends yet 💌</p>}
         {contacts.map(c => (
           <div key={c.name} className="contact-card">
             <div className="contact-avatar">{c.name[0].toUpperCase()}</div>
             <div className="contact-info">
               <strong>{c.name}</strong>
-              <span style={{ fontSize: '0.75em', color: '#9a89b3', fontFamily: 'monospace' }}>
+              <span style={{ fontSize: '0.75em', color: 'var(--text-secondary)', fontFamily: 'monospace' }}>
                 {c.publicKey.slice(27, 55)}…
               </span>
             </div>
@@ -141,7 +141,7 @@ export default function ContactsTab() {
         ))}
       </div>
 
-      <div className="input-group" style={{ marginTop: 30, borderTop: '1px solid rgba(0,0,0,0.1)', paddingTop: 20 }}>
+      <div className="input-group" style={{ marginTop: 30, borderTop: '1px solid var(--border-soft)', paddingTop: 20 }}>
         <p className="setting-label">📋 Your Identity (Share with friends)</p>
         <textarea readOnly value={myPubKey} placeholder="No identity found. Create New Identity." />
         <div className="actions">

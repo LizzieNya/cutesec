@@ -199,11 +199,11 @@ export default function PgpTab() {
         <div className="pgp-sidebar">
           <h3>Keyring 🔑</h3>
           <div className="pgp-key-list">
-            {myKeys.length === 0 && <p style={{ color: '#9a89b3', fontSize: '0.85em' }}>No keys yet</p>}
+            {myKeys.length === 0 && <p style={{ color: 'var(--text-secondary)', fontSize: '0.85em' }}>No keys yet</p>}
             {myKeys.map(k => (
-              <div key={k.id} className="pgp-key-item" style={{ padding: '8px', borderRadius: 8, marginBottom: 6, background: 'rgba(255,182,193,0.1)' }}>
+              <div key={k.id} className="pgp-key-item" style={{ padding: '8px', borderRadius: 8, marginBottom: 6, background: 'var(--accent-soft)' }}>
                 <strong style={{ fontSize: '0.85em' }}>{k.name}</strong>
-                <div style={{ fontSize: '0.75em', color: '#9a89b3' }}>{k.email}</div>
+                <div style={{ fontSize: '0.75em', color: 'var(--text-secondary)' }}>{k.email}</div>
                 <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
                   <button className="btn-secondary btn-small"
                     onClick={() => copyTextWithFallback(k.publicKey, showMessage, clipboardWrite, 'Key copied!')}>📋</button>
@@ -218,9 +218,9 @@ export default function PgpTab() {
           </div>
           <h4 style={{ marginTop: 14, marginBottom: 8 }}>PGP Contacts</h4>
           <div className="pgp-key-list">
-            {contacts.length === 0 && <p style={{ color: '#9a89b3', fontSize: '0.85em' }}>No PGP contacts yet</p>}
+            {contacts.length === 0 && <p style={{ color: 'var(--text-secondary)', fontSize: '0.85em' }}>No PGP contacts yet</p>}
             {contacts.map((c) => (
-              <div key={c.id} className="pgp-key-item" style={{ padding: '8px', borderRadius: 8, marginBottom: 6, background: 'rgba(137,207,240,0.12)' }}>
+              <div key={c.id} className="pgp-key-item" style={{ padding: '8px', borderRadius: 8, marginBottom: 6, background: 'color-mix(in srgb, var(--accent-2) 12%, transparent)' }}>
                 <strong style={{ fontSize: '0.85em' }}>{c.name}</strong>
                 <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
                   <button className="btn-secondary btn-small"

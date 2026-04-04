@@ -539,7 +539,7 @@ export default function StegoTab() {
             <>
               <div className="stego-capacity-bar-container">
                 <div className="stego-capacity-bar"
-                  style={{ width: Math.min(capacity.usage, 100) + '%', backgroundColor: capacity.usage > 100 ? '#f39c12' : '#2ecc71' }} />
+                  style={{ width: Math.min(capacity.usage, 100) + '%', backgroundColor: capacity.usage > 100 ? 'var(--accent)' : 'var(--peer-online-color)' }} />
               </div>
               <div className="stego-capacity-text">
                 {capacity.usage > 100

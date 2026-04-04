@@ -893,11 +893,11 @@ export default function App() { // NOSONAR
                         top: '50%',
                         left: '50%',
                         transform: 'translate(-50%, -50%)',
-                        border: '2px solid #ff69b4',
+                        border: '2px solid var(--accent)',
                         width: 200,
                         height: 200,
                         borderRadius: 20,
-                        boxShadow: '0 0 0 9999px rgba(0, 0, 0, 0.5)',
+                        boxShadow: '0 0 10px var(--accent-border)' 
                       }}
                     />
                   </div>
